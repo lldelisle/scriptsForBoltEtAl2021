@@ -1,0 +1,4 @@
+cluster_3.txt	Hoxa11	Hoxd13	3	3	genotype
+cluster_3.txt	Hoxa13	Hoxd13	3	3	genotype
+cluster_6.txt	Hoxa11	Hoxd13	3	3	genotype
+cluster_6.txt	Hoxd11	Hoxd13	3	3	genotype

@@ -162,18 +162,18 @@ for (i in 1:length(my.clusters.nb)){
         ggsave(file.path(plot.folder, paste0("Figure3e_cluster", my.clusters.nb[i], ".pdf")), width = 10, height = 3)
 }
 
-# Figure S3b: selected genes in each cluster
+# Figure S3c: selected genes in each cluster
 VlnPlot(mainCluster, features = c("Hoxd13", "Hoxa11","Hoxd11", "Hoxa13", "Shox2"), 
         group.by = "seurat_clusters", split.by = "genotype", same.y.lims = T, stack = T, flip = T) +
         scale_fill_manual(values=c('wt'="grey", 'inv2'="pink"))
-ggsave(file.path(plot.folder, "Figure3Sb.pdf"), width = 12, height = 7)
+ggsave(file.path(plot.folder, "Figure3Sc.pdf"), width = 12, height = 7)
 
 
 wt_subset <- subset(samples.merged, subset = genotype == "wt")
 inv2_subset <- subset(samples.merged, subset = genotype == "inv2")
 
-# Figure S3c: selected genes on UMAP
-my.genes <- c("Hoxd13", "Hoxd11", "Hoxa11", "Hoxa13", "Shox2")
+# Figure S3d: selected genes on UMAP
+my.genes <- c("Hoxd13", "Hoxd11", "Hoxa11", "Hoxa13")
 for (i in 1:length(my.genes)){
         p2 <- FeaturePlot(wt_subset, features = my.genes[i], order = T, pt.size = 1.2, label = T,
                           label.size = 7, ncol = 1, cols = c("lightgrey", my.fixed.colors[my.genes[i]])) +
@@ -182,10 +182,10 @@ for (i in 1:length(my.genes)){
                           label.size = 7, ncol = 1, cols = c("lightgrey",  my.fixed.colors[my.genes[i]])) + 
                 ggtitle('inv2')
         g <- (p2 + coord_cartesian(xlim = c(-8, 8), ylim = c(-6, 6)) | p3 + coord_cartesian(xlim = c(-8, 8), ylim = c(-6, 6))) + plot_layout(guides = 'collect')
-        ggsave(file.path(plot.folder, paste0("Figure3Sc_", my.genes[i], ".pdf")), g, width = 10, height = 5)
+        ggsave(file.path(plot.folder, paste0("Figure3Sd_", my.genes[i], ".pdf")), g, width = 10, height = 5)
 }
 
-# Figure 3Sd: proportion of cells with detected expression 
+# Figure 4Sa: proportion of cells with detected expression 
 my.genes <- c("Hoxd13", "Hoxa11", "Hoxd11", "Hoxa13")
 fixed.colors.a11.a13.d11 <- c(my.fixed.colors, "grey")
 names(fixed.colors.a11.a13.d11) <- c(names(my.fixed.colors), "No expression")
@@ -243,6 +243,109 @@ for (my.genex in my.genesx){
                 facet_grid(genotype ~ cluster, labeller = label_both) +
                 scale_fill_manual(values=fixed.colors.a11.a13.d11) +
                 ggtitle(paste0("Correlation ", my.genex, " Hoxd13"))
-        ggsave(file.path(plot.folder,paste0("Figure3Sd_", my.genex, ".pdf")),
+        ggsave(file.path(plot.folder,paste0("Figure4Sa_", my.genex, ".pdf")),
                height = 5, width = 12)
 }
+
+# Integration with ENCODE data:
+# Download the data
+url <- "https://cells.ucsc.edu/mouse-limb/10x/200120_10x.h5ad"
+if ( ! file.exists("200120_10x.h5ad")){
+        download.file(url, basename(url))
+}
+# Convert them to load in Seurat
+Convert("200120_10x.h5ad", dest = "h5seurat", overwrite = F)
+limb <- LoadH5Seurat("200120_10x.h5seurat")
+# Remove the doublet cells
+table(limb$doublet_corrected_p_less_than_0_1)
+#     0     1
+# 86593  4044
+limb <- subset(limb, doublet_corrected_p_less_than_0_1 == 0)
+# Select the e12 and e13 datasets
+limb.e12e13 <- subset(limb, stage %in% c("12.0", "13.0"))
+# Simplify the cell type
+limb.e12e13$cell_type_simple <- gsub(" [1-4]", "", limb.e12e13$cell_type)
+# Put in list:
+both <- list(samples.merged,
+             limb.e12e13)
+# Normalize and find variable features
+both <- lapply(X = both, FUN = function(x) {
+        x <- NormalizeData(x, verbose = FALSE)
+        x <- FindVariableFeatures(x, verbose = FALSE)
+})
+# Find common variable features
+features <- SelectIntegrationFeatures(object.list = both)
+# Regress for cell-cycles genes
+s.genes <- cc.genes.updated.2019$s.genes 
+g2m.genes <- cc.genes.updated.2019$g2m.genes
+both <- lapply(X = both, FUN = function(x) {
+        x <- CellCycleScoring(x, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+        x <- ScaleData(x, features = features, vars.to.regress = c("S.Score", "G2M.Score"), verbose = FALSE)
+        x <- RunPCA(x, features = features, verbose = FALSE)
+})
+# Find anchors
+anchors <- FindIntegrationAnchors(object.list = both, reduction = "rpca", 
+                                  dims = 1:30)
+# Integrate both datasets
+integrated <- IntegrateData(anchorset = anchors, dims = 1:30)
+# Regress cell cycle again
+integrated <- CellCycleScoring(integrated, s.features = s.genes, g2m.features = g2m.genes)
+integrated <- ScaleData(integrated, vars.to.regress = c("S.Score", "G2M.Score"), verbose = FALSE)
+# Run UMAP
+integrated <- RunPCA(integrated, verbose = FALSE)
+integrated <- RunUMAP(integrated, dims = 1:30)
+
+# Add labels
+new.orig.ident <- integrated$orig.ident
+new.orig.ident[is.na(new.orig.ident)] <- "ENCODE"
+new.orig.ident[grepl("scRNA", new.orig.ident)] <- "wt + Inv2"
+
+# Combine cluster names
+new.cluster.names <- NA
+new.cluster.names[new.orig.ident == "ENCODE"] <- integrated$cell_type_simple[new.orig.ident == "ENCODE"]
+new.cluster.names[new.orig.ident == "wt + Inv2"] <- integrated$seurat_clusters[new.orig.ident == "wt + Inv2"]
+
+# Add this info the Seurat object
+integrated$new.orig.ident <- factor(new.orig.ident, levels = c("ENCODE", "wt + Inv2"))
+integrated$new.cluster.names <- factor(new.cluster.names, levels = c(sort(unique(new.cluster.names[new.orig.ident == "ENCODE"])),
+                                                                     sort(as.numeric(unique(new.cluster.names[new.orig.ident == "wt + Inv2"])))))
+Idents(integrated) <- integrated$new.orig.ident
+
+# I remove cell types with less than 10 cells:
+cell.types.to.rm <- names(table(new.cluster.names))[table(new.cluster.names) < 10]
+temp <- subset(integrated, cells = colnames(integrated)[! integrated$new.cluster.names %in% cell.types.to.rm])
+
+# I find UMAP coordinates to get only the main cluster
+DimPlot(integrated, split.by = "new.orig.ident", group.by = "new.cluster.names") +
+        geom_abline(intercept = c(-8, 7), slope = 0) +
+        geom_vline(xintercept = 8)
+
+# I plot only the main cluster:
+temp <- subset(temp, UMAP_1 < 8 & UMAP_2 < 7 & UMAP_2 > -8)
+
+# These are coordinates which circle the clusters 7, 8, 11
+poly <- data.frame(x = c(-7, -2.5, -2.7, -2.3, -5), y = c(-3, -6, -2.5, 2, 3))
+
+my.colors <- c(hue_pal()(length(unique(temp$new.cluster.names[temp$new.orig.ident == "ENCODE"]))),
+               brewer_pal(palette = "Paired")(length(unique(temp$new.cluster.names[temp$new.orig.ident == "wt + Inv2"]))))
+names(my.colors) <- c(sort(unique(as.character(temp$new.cluster.names[temp$new.orig.ident == "ENCODE"]))),
+                      sort(as.numeric(unique(as.character(temp$new.cluster.names[temp$new.orig.ident == "wt + Inv2"])))))
+DimPlot(temp, 
+        cells = WhichCells(temp, cells = colnames(temp)[temp$new.orig.ident == "ENCODE"]),
+        group.by = "new.cluster.names") +
+        geom_polygon(data = poly, aes(x = x, y = y), alpha = 0, color = "black") +
+        theme(legend.text = element_text(size = 10)) +
+        scale_color_manual(values = my.colors) +
+        ggtitle("ENCODE (E12 & E13)")
+ggsave("fig3SBa.pdf", width = 6, height = 4)
+DimPlot(temp, 
+        cells = WhichCells(temp, cells = colnames(temp)[temp$new.orig.ident == "wt + Inv2"]),
+        group.by = "new.cluster.names") +
+        geom_polygon(data = poly, aes(x = x, y = y), alpha = 0, color = "black") +
+        theme(legend.text = element_text(size = 10)) +
+        scale_color_manual(values = my.colors) +
+        ggtitle("Combined (wt + Inv2)")
+ggsave("fig3SBb.pdf", width = 6, height = 4)
+DimPlot(temp, order = T) +
+        geom_polygon(data = poly, aes(x = x, y = y), alpha = 0, color = "black")
+ggsave("fig3SBc.pdf", width = 6, height = 4)
