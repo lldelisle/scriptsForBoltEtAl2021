@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/335188355.svg)](https://zenodo.org/badge/latestdoi/335188355)
+
 # scriptsForBoltEtAl2021
 
 All the scripts needed to reproduce the NGS figures in Bolt et al. 2021 from raw data.
