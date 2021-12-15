@@ -24,4 +24,4 @@ cat mm10.fa | grep ">" | grep -v chr2 | sed 's/>//' > listOfChrs.txt
 # I reformat them:
 # This can be long:
 seqtk seq -U mm10.fa | seqtk subseq -l 60 - listOfChrs.txt > allChrsIncludingContigsExceptchr2.fa
-cat chr2_inv2.fa.gz allChrsIncludingContigsExceptchr2.fa > mm10_inv2.fa
+cat chr2_inv2.fa allChrsIncludingContigsExceptchr2.fa > mm10_inv2.fa
